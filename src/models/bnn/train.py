@@ -2,16 +2,16 @@ from .classifier import BayesianClassifier
 
 
 class BNNTrainer:
-    def __init__(self, model: BayesianClassifier, optimiser, criterion):
+    def __init__(self, model: BayesianClassifier, optimizer, criterion):
         self.model = model
-        self.optimiser = optimiser
+        self.optimizer = optimizer
         self.criterion = criterion
 
     def train_epoch(self, train_loader):
         total_loss = 0
 
         for data, target in train_loader:
-            self.optimiser.zero_grad()
+            self.optimizer.zero_grad()
 
             loss = self.model.sample_elbo(
                 inputs=data,
@@ -21,7 +21,7 @@ class BNNTrainer:
                 complexity_cost_weight=1e-6
             )
             loss.backward()
-            self.optimiser.step()
+            self.optimizer.step()
             total_loss += loss.item()
 
         return total_loss / len(train_loader)
