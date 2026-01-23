@@ -1,0 +1,2 @@
+torch>=2.10.0
+blitz-bayesian-pytorch>=0.2.8
