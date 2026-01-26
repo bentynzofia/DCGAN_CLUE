@@ -1,3 +1,3 @@
-from .dataloader import train_loader, test_loader
+from .dataloader import get_mnist_loaders
 
-__all__ = [train_loader, test_loader]
+__all__ = ['get_mnist_loaders']
