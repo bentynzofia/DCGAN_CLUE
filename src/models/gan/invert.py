@@ -10,7 +10,7 @@ class GANInverter:
         self.generator.to(device)
         self.generator.eval()
 
-    def invert(self, target_image, num_steps=10000, lr=0.03, latent_dim=64):
+    def invert(self, target_image, num_steps=1000, lr=0.02, latent_dim=64):
         target_image = target_image.to(self.device)
         z = torch.randn(1, latent_dim, device=self.device, requires_grad=True)
         optimizer = optim.Adam([z], lr=lr)
@@ -40,7 +40,7 @@ class GANInverter:
 
 
 class DCGANInverter:
-    def __init__(self, generator, prior='normal', device='cuda' if torch.cuda.is_available() else 'cpu'):
+    def __init__(self, generator, prior='uniform', device='cuda' if torch.cuda.is_available() else 'cpu'):
         self.generator = generator
         self.prior = prior  # 'normal' or 'uniform'
         self.device = device
@@ -119,7 +119,7 @@ class DCGANInverter:
                 return module.in_features
             elif hasattr(module, 'l1'):  # For DCGAN structure
                 return module.l1[0].in_features
-        return 100  # Default
+        return 100
 
     # ADDITIONAL: Batch inversion helper
     def invert_batch(self, target_images, **kwargs):
