@@ -17,4 +17,4 @@ trainer = BNNTrainer(
     criterion=criterion,
 )
 
-losses = trainer.train(train_loader, epochs=10)
+losses = trainer.train(train_loader, epochs=2)

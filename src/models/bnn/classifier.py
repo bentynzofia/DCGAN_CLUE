@@ -27,10 +27,9 @@ class BayesianClassifier(nn.Module):
         torch.save({
             'state_dict': self.state_dict(),
             'config': {
-                'input_dim': self.network[0].in_features,
-                'hidden_dims': [module.out_features for module in self.network
-                                if isinstance(module, nn.Linear)][:-1],
-                'num_classes': self.network[-1].out_features
+                'input_dim': self.input_dim,
+                'hidden_dims': self.hidden_dims,
+                'num_classes': self.num_classes
             }
         }, path)
 

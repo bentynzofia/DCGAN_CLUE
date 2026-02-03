@@ -125,7 +125,7 @@ class DCGANTrainer:
 
         return real_images, fake_images
 
-    def train(self, data_loader, epochs=2, save_dir='save', sample_dir='samples'):
+    def train(self, data_loader, epochs=1, save_dir='save', sample_dir='samples'):
         d_losses = np.zeros(epochs)
         g_losses = np.zeros(epochs)
         real_scores = np.zeros(epochs)

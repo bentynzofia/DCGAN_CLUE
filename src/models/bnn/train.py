@@ -36,4 +36,6 @@ class BNNTrainer:
             if verbose:
                 print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
 
+        self.model.save('BNN_results/saves/bnn.pth')
+
         return losses

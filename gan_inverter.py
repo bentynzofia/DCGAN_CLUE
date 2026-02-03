@@ -72,26 +72,28 @@ random_images, random_labels = next(iter(data_loader))
 generator = DCGenerator()
 # generator = Generator(latent_size=64, image_size=784, hidden_size=256)
 
-checkpoint = torch.load('save/G_final.pth', map_location='cpu')  # for GAN change path to 'save_GAN/G_final.pth'
+checkpoint = torch.load('DCGAN_results/saves/G_final.pth', map_location='cpu')  # for GAN change path to 'save_GAN/G_final.pth'
 generator.load_state_dict(checkpoint)
 
 if isinstance(generator, DCGenerator):
+    path = "DCGAN_results/inversion"
     loss = 'BCE'
-    inverter = DCGANInverter(generator)
+    inverter = DCGANInverter(generator)  # issue as i am testing the gan bnn pipeline and try to define new parameter in inverter of gan package
     img = random_images[0].unsqueeze(0)
     z_batch, reconstructions, losses = inverter.invert_batch(
         random_images, use_regularization=True
     )
 
-    plot_batch_reconstructions(random_images, reconstructions, filename="dcgan_batch_inversion_result")
+    plot_batch_reconstructions(random_images, reconstructions, filename=f"{path}/dcgan_batch_inversion_result")
 
     plot_single_reconstruction(random_images[0].squeeze(),
                                reconstructions[0].view(28, 28).cpu(),
                                random_labels[0], loss,
-                               filename="dcgan_inversion_result")
+                               filename=f"{path}/dcgan_inversion_result")
 
-    plot_inversion_loss(losses, loss, filename="dcgan_inversion_loss_curve")
+    plot_inversion_loss(losses, loss, filename=f"{path}/dcgan_inversion_loss_curve")
 else:
+    path = "GAN_results/inversion"
     loss = 'MSE'
     inverter = GANInverter(generator)
     img = random_images[0].view(-1)
@@ -99,6 +101,6 @@ else:
     plot_single_reconstruction(random_images[0].squeeze(),
                                reconstructed[0].view(28, 28).cpu(),
                                random_labels[0], loss,
-                               filename="gan_inversion_result.png")
+                               filename=f"{path}/gan_inversion_result.png")
 
-    plot_inversion_loss(losses, loss, filename="gan_inversion_loss_curve")
+    plot_inversion_loss(losses, loss, filename=f"{path}/gan_inversion_loss_curve")

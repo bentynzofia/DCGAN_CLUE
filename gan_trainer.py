@@ -16,12 +16,15 @@ if isinstance(G, DCGenerator) and isinstance(D, DCDiscriminator):
     G.apply(weights_init)
     D.apply(weights_init)
 
+    sample_dir = 'DCGAN_results/training_samples'
+    save_dir = 'DCGAN_results/saves'
+else:
+    sample_dir = 'GAN_results/training_samples'
+    save_dir = 'GAN_results/saves'
+
 criterion = nn.BCELoss()
 d_optimizer = torch.optim.Adam(D.parameters(), lr=0.0002)
 g_optimizer = torch.optim.Adam(G.parameters(), lr=0.0002)
-
-sample_dir = 'samples'
-save_dir = 'save'
 
 if not os.path.exists(sample_dir):
     os.makedirs(sample_dir)
@@ -30,4 +33,4 @@ if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 
 trainer = DCGANTrainer(G, D, g_optimizer, d_optimizer)
-trainer.train(data_loader)
+trainer.train(data_loader, epochs=20, sample_dir=sample_dir, save_dir=save_dir)

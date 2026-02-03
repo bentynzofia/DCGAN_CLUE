@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 
 
 class GANInverter:
@@ -39,89 +40,112 @@ class GANInverter:
         return z.detach(), reconstructed.detach(), losses
 
 
-class DCGANInverter:
-    def __init__(self, generator, prior='uniform', device='cuda' if torch.cuda.is_available() else 'cpu'):
-        self.generator = generator
-        self.prior = prior  # 'normal' or 'uniform'
+class GanBnnPipeline:
+    def __init__(self, generator, prior='normal', device='cuda' if torch.cuda.is_available() else 'cpu'):
+        self.generator = generator.to(device).eval()
+        self.prior = prior
         self.device = device
-        self.generator.to(device)
-        self.generator.eval()
+        self.latent_dim = self._get_latent_dim()
 
-    def invert(self, target_images, num_steps=1000, lr=0.02,
-               use_regularization=False, gamma1=1.0, gamma2=1.0):
-        """
-        target_images: Tensor of shape (B, C, H, W)
-        Following Algorithm 1 and Section 2.3 of the paper
-        """
-        target_images = target_images.to(self.device)
-        B, latent_dim = target_images.shape[0], self.get_latent_dim()
+    def _get_latent_dim(self):
+        for m in self.generator.modules():
+            if isinstance(m, nn.Linear): return m.in_features
+            if isinstance(m, nn.ConvTranspose2d): return m.in_channels
+        return 100
 
-        # Step 2: Initialize from prior (Algorithm 1)
+    def _initialize_z(self, batch_size, z_init=None):
+        if z_init is not None:
+            return z_init.clone().detach().to(self.device).requires_grad_(True)
+
         if self.prior == 'uniform':
-            # Start near 0, not full uniform
-            z = torch.randn(B, latent_dim, device=self.device) * 0.1
-        else:  # normal
-            # Start with small variance
-            z = torch.randn(B, latent_dim, device=self.device) * 0.1
+            z = torch.rand(batch_size, self.latent_dim, device=self.device) * 2 - 1
+        else:
+            z = torch.randn(batch_size, self.latent_dim, device=self.device)
+        return z.requires_grad_(True)
 
-        z.requires_grad_(True)
+    def _get_bnn_loss(self, generated, bnn, target_label, bnn_samples):
+        bnn_input = generated.view(generated.size(0), -1)
+        samples = torch.stack([torch.softmax(bnn(bnn_input), dim=1) for _ in range(bnn_samples)])
 
+        mean_probs = samples.mean(dim=0)
+        uncertainty = samples.std(dim=0).mean()
+
+        class_loss = F.nll_loss(torch.log(mean_probs + 1e-8), target_label)
+        return class_loss + (2.0 * uncertainty), mean_probs, uncertainty
+
+    def invert(self, target_images, num_steps=1000, lr=0.02):  # Pixel loss only
+        z = self._initialize_z(target_images.size(0))
         optimizer = optim.Adam([z], lr=lr)
-        losses = []
+        target_norm = (target_images.to(self.device) + 1) / 2.0
 
         for step in range(num_steps):
             optimizer.zero_grad()
+            generated_norm = (self.generator(z) + 1) / 2.0
+            loss = F.binary_cross_entropy(generated_norm, target_norm)
 
-            # Generate images
+            loss += 0.01 * torch.norm(z)  # L2
+
+            loss.backward()
+            optimizer.step()
+            if step % 200 == 0: print(f"Invert Step {step}, Loss: {loss.item():.4f}")
+
+        return z.detach(), self.generator(z).detach()
+
+    def steer(self, bnn, target_class_idx, track_history=False, z_init=None, num_steps=500, lr=0.01, bnn_samples=15):  # BNN loss only
+        batch_size = 1
+        z = self._initialize_z(batch_size, z_init)
+        optimizer = optim.Adam([z], lr=lr)
+
+        history_images = []
+        history_stats = []
+
+        results = {}
+
+        if not isinstance(target_class_idx, torch.Tensor):
+            target_label = torch.tensor([target_class_idx], device=self.device)
+        else:
+            target_label = target_class_idx.to(self.device)
+
+        for step in range(num_steps):
+            optimizer.zero_grad()
             generated = self.generator(z)
 
-            # PAPER'S LOSS: Binary Cross-Entropy (Eqn 1)
-            # Convert from [-1, 1] (tanh) to [0, 1] for BCE
-            target_norm = (target_images + 1) / 2.0
-            generated_norm = (generated + 1) / 2.0
+            total_loss, mean_probs, uncertainty = self._get_bnn_loss(generated, bnn, target_label, bnn_samples)
+            if step == 0:
+                results['initial'] = {
+                    'img': generated.detach().cpu(),
+                    'pred': mean_probs.argmax(dim=1).item(),
+                    'conf': mean_probs[0, target_class_idx].item(),
+                    'unc': uncertainty.item()
+                }
 
-            # BCE loss
-            loss = -torch.mean(
-                target_norm * torch.log(generated_norm + 1e-8) +
-                (1 - target_norm) * torch.log(1 - generated_norm + 1e-8)
-            )
-
-            # PAPER'S REGULARIZATION (Section 2.3, Eqn 5) - only if requested
-            if use_regularization and self.prior == 'normal':
-                mu_z = torch.mean(z)
-                sigma_z = torch.std(z)
-                reg_loss = gamma1 * (mu_z ** 2) + gamma2 * ((sigma_z - 1) ** 2)
-                loss = loss + reg_loss
+            loss = total_loss + 0.01 * torch.norm(z)  # L2
 
             loss.backward()
             optimizer.step()
 
-            # PAPER'S CLIPPING for uniform prior (Section 2.3)
-            if use_regularization and self.prior == 'uniform':
-                with torch.no_grad():
-                    z.data = torch.clamp(z.data, -1, 1)
-
-            losses.append(loss.item())
+            if track_history:
+                if step % 10 == 0 or step == num_steps - 1:
+                    history_images.append(generated.detach().cpu())
+                    current_pred = mean_probs.argmax(dim=1).item()
+                    history_stats.append({
+                        'step': step,
+                        'conf': mean_probs[0, target_class_idx].item(),
+                        'unc': uncertainty.item(),
+                        'pred': current_pred
+                    })
 
             if step % 100 == 0:
-                print(f"Step {step}, Loss: {loss.item():.6f}")
+                prob = mean_probs[0, target_label.item()].item()
+                print(f"Steer Step {step} | Conf: {prob:.6f} | Unc: {uncertainty.item():.6f}")
 
-        with torch.no_grad():
-            reconstructed = self.generator(z)
+        final_gen = self.generator(z).detach()
+        _, final_mean, final_unc = self._get_bnn_loss(final_gen, bnn, target_label, bnn_samples)
 
-        return z.detach(), reconstructed.detach(), losses
-
-    def get_latent_dim(self):
-        """Infer latent dimension from generator"""
-        # Check first layer of generator
-        for module in self.generator.modules():
-            if isinstance(module, nn.Linear):
-                return module.in_features
-            elif hasattr(module, 'l1'):  # For DCGAN structure
-                return module.l1[0].in_features
-        return 100
-
-    # ADDITIONAL: Batch inversion helper
-    def invert_batch(self, target_images, **kwargs):
-        """Wrapper to ensure batch inversion"""
-        return self.invert(target_images, **kwargs)
+        results['final'] = {
+            'img': final_gen.cpu(),
+            'pred': final_mean.argmax(dim=1).item(),
+            'conf': final_mean[0, target_class_idx].item(),
+            'unc': final_unc.item()
+        }
+        return z.detach(), self.generator(z).detach(), history_images, history_stats, results
